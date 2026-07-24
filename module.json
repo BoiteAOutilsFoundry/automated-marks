@@ -2,7 +2,7 @@
   "id": "automated-marks",
   "title": "Automated Marks",
   "description": "Automatisation de Hex et Hunter's Mark avec sorts et scripts de déplacement séparés.",
-  "version": "1.0.1",
+  "version": "1.0.0",
   "authors": [
     {
       "name": "Automated Marks"
