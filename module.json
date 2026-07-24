@@ -1,0 +1,52 @@
+{
+  "id": "automated-marks",
+  "title": "Automated Marks",
+  "description": "Automatisation de Hex et Hunter's Mark avec sorts et scripts de déplacement séparés.",
+  "version": "1.0.1",
+  "authors": [
+    {
+      "name": "Automated Marks"
+    }
+  ],
+  "compatibility": {
+    "minimum": "12",
+    "verified": "12.343",
+    "maximum": "12"
+  },
+  "relationships": {
+    "systems": [
+      {
+        "id": "dnd5e",
+        "type": "system",
+        "compatibility": {
+          "minimum": "4.4.2",
+          "verified": "4.4.2",
+          "maximum": "4.4.2"
+        }
+      }
+    ],
+    "requires": [
+      {
+        "id": "midi-qol",
+        "type": "module",
+        "compatibility": {
+          "minimum": "12.4.53",
+          "verified": "12.4.53"
+        }
+      }
+    ]
+  },
+  "esmodules": [
+    "scripts/main.js"
+  ],
+  "languages": [
+    {
+      "lang": "fr",
+      "name": "Français",
+      "path": "lang/fr.json"
+    }
+  ],
+  "styles": [
+    "styles/automated-marks.css"
+  ]
+}
