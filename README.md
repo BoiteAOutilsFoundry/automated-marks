@@ -1,4 +1,4 @@
-# Automated Marks 1.0.0
+# Automated Marks 1.0.1
 
 ## Organisation
 
@@ -110,3 +110,7 @@ avec le niveau de l’emplacement utilisé :
 - niveaux 5–9 : 24 heures.
 
 Cette correction s’applique à `Hex` et à `Hunter's Mark`.
+
+
+## Changelog
+See CHANGELOG.md for version history.
