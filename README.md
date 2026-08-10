@@ -1,4 +1,4 @@
-# Automated Marks 1.0.1
+# Automated Marks 1.0.2
 
 ## Organisation
 

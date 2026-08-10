@@ -1,5 +1,6 @@
 const MODULE_ID = "automated-marks";
-const MODULE_VERSION = "1.0.1";
+const MODULE_VERSION = "1.0.2";
+const SOCKET_NAME = `module.${MODULE_ID}`;
 
 const HEX_NAME = "Hex";
 const HUNTERS_MARK_NAME = "Hunter's Mark";
@@ -327,7 +328,7 @@ const SCRIPT_SOURCES = [
     "folder": null,
     "sort": 0,
     "ownership": {
-      "default": 0
+      "default": 1
     },
     "flags": {
       "automated-marks": {
@@ -351,7 +352,7 @@ const SCRIPT_SOURCES = [
     "folder": null,
     "sort": 0,
     "ownership": {
-      "default": 0
+      "default": 1
     },
     "flags": {
       "automated-marks": {
@@ -371,6 +372,7 @@ const HEX_DAMAGE_COMMAND = "const data = typeof args !== \"undefined\" ? args?.[
 const HUNTERS_MARK_DAMAGE_COMMAND = "const data = typeof args !== \"undefined\" ? args?.[0] : null;\nif (!data) return {};\n\nconst currentWorkflow =\n    data.workflow ??\n    (\n        data.uuid &&\n        typeof MidiQOL?.Workflow?.getWorkflow === \"function\"\n            ? MidiQOL.Workflow.getWorkflow(data.uuid)\n            : null\n    );\n\nif (!currentWorkflow) return {};\n\nlet attackingActor =\n    (typeof actor !== \"undefined\" ? actor : null) ??\n    currentWorkflow.actor ??\n    data.actor ??\n    null;\n\nif (!attackingActor && data.actorUuid) {\n    const actorDocument = await fromUuid(data.actorUuid);\n    attackingActor = actorDocument?.actor ?? actorDocument ?? null;\n}\n\nif (!attackingActor) return {};\n\nconst damageEffect = attackingActor.effects.find(effect =>\n    effect.getFlag(\"automated-marks\", \"huntersMarkDamageEffect\") === true\n);\n\nif (!damageEffect) return {};\n\nconst markedTargetUuid =\n    damageEffect.getFlag(\"automated-marks\", \"huntersMarkTargetUuid\");\n\nif (!markedTargetUuid) return {};\n\nconst markedDocument = await fromUuid(markedTargetUuid);\nif (!markedDocument) return {};\n\nconst markedTokenDocument =\n    markedDocument.documentName === \"Token\"\n        ? markedDocument\n        : markedDocument.document?.documentName === \"Token\"\n            ? markedDocument.document\n            : null;\n\nif (!markedTokenDocument) return {};\n\nconst markedToken =\n    markedTokenDocument.object ??\n    canvas.tokens.get(markedTokenDocument.id) ??\n    null;\n\nconst markedActor =\n    markedTokenDocument.actor ??\n    markedToken?.actor ??\n    null;\n\nif (!markedToken || !markedActor) return {};\n\nconst markedTokenUuid = markedTokenDocument.uuid;\nconst markedActorUuid = markedActor.uuid;\nconst targetCandidates = [];\n\nconst addTargets = collection => {\n    if (!collection) return;\n    if (typeof collection === \"string\") {\n        targetCandidates.push(collection);\n        return;\n    }\n    if (collection instanceof Set || Array.isArray(collection)) {\n        targetCandidates.push(...Array.from(collection));\n        return;\n    }\n    targetCandidates.push(collection);\n};\n\naddTargets(data.hitTargetUuids);\naddTargets(data.hitTargets);\naddTargets(data.targetUuids);\naddTargets(data.targets);\naddTargets(currentWorkflow.hitTargetUuids);\naddTargets(currentWorkflow.hitTargets);\naddTargets(currentWorkflow.targets);\n\nif (targetCandidates.length === 0) return {};\n\nconst targetMatchesMark = targetCandidates.some(candidate => {\n    if (!candidate) return false;\n\n    if (typeof candidate === \"string\") {\n        return (\n            candidate === markedTargetUuid ||\n            candidate === markedTokenUuid ||\n            candidate === markedActorUuid\n        );\n    }\n\n    const candidateTokenUuid =\n        candidate.document?.uuid ??\n        candidate.token?.document?.uuid ??\n        candidate.tokenUuid ??\n        candidate.uuid ??\n        null;\n\n    const candidateActorUuid =\n        candidate.actor?.uuid ??\n        candidate.document?.actor?.uuid ??\n        candidate.token?.actor?.uuid ??\n        candidate.actorUuid ??\n        null;\n\n    return (\n        candidateTokenUuid === markedTargetUuid ||\n        candidateTokenUuid === markedTokenUuid ||\n        candidateActorUuid === markedActorUuid\n    );\n});\n\nif (!targetMatchesMark) return {};\n\nconst isCritical =\n    data.isCritical === true ||\n    data.critical === true ||\n    currentWorkflow.isCritical === true ||\n    currentWorkflow.critical === true ||\n    currentWorkflow.attackRoll?.isCritical === true ||\n    data.attackRoll?.isCritical === true;\n\nconst damageFormula =\n    isCritical\n        ? \"2d6[force]\"\n        : \"1d6[force]\";\n\nconst flavor =\n    isCritical\n        ? \"Hunter's Mark — Dégâts critiques\"\n        : \"Hunter's Mark — Dégâts\";\n\nconst attackingToken =\n    currentWorkflow.token ??\n    currentWorkflow.tokenDocument?.object ??\n    canvas.tokens.placeables.find(token =>\n        token.actor?.uuid === attackingActor.uuid\n    ) ??\n    null;\n\nif (!attackingToken) return {};\n\nconst actorUuid = attackingActor.uuid;\nconst markedTokenUuidForDelay = markedTokenDocument.uuid;\nconst attackingTokenId = attackingToken.id;\n\nsetTimeout(async () => {\n    try {\n        const delayedActor = await fromUuid(actorUuid);\n        const delayedMarkedTokenDocument =\n            await fromUuid(markedTokenUuidForDelay);\n\n        if (!delayedActor || !delayedMarkedTokenDocument) return;\n\n        const delayedMarkedToken =\n            delayedMarkedTokenDocument.object ??\n            canvas.tokens.get(delayedMarkedTokenDocument.id) ??\n            null;\n\n        const delayedAttackingToken =\n            canvas.tokens.get(attackingTokenId) ??\n            canvas.tokens.placeables.find(token =>\n                token.actor?.uuid === delayedActor.uuid\n            ) ??\n            null;\n\n        if (!delayedMarkedToken || !delayedAttackingToken) return;\n\n        const damageRoll =\n            await new CONFIG.Dice.DamageRoll(\n                damageFormula,\n                delayedActor.getRollData()\n            ).evaluate({ async: true });\n\n        await new MidiQOL.DamageOnlyWorkflow(\n            delayedActor,\n            delayedAttackingToken,\n            damageRoll.total,\n            \"force\",\n            [delayedMarkedToken],\n            damageRoll,\n            { flavor, itemCardId: null }\n        );\n    } catch (error) {\n        console.error(\"Automated Marks | Hunter's Mark damage error\", error);\n        ui.notifications.error(\n            \"Hunter's Mark : impossible de lancer les dégâts supplémentaires.\"\n        );\n    }\n}, 500);\n\nreturn {};";
 
 const processedWorkflows = new Set();
+const pendingSocketRequests = new Map();
 let automatedMarksInternalDeletion = false;
 let automatedMarksSubmenuOpen = false;
 
@@ -379,6 +381,8 @@ Hooks.once("ready", async () => {
         ui.notifications.error("Automated Marks : Midi-QOL doit être activé.");
         return;
     }
+
+    game.socket.on(SOCKET_NAME, handleAutomatedMarksSocket);
 
     if (game.user.isGM) {
         await repairAutomatedMarksContent();
@@ -395,6 +399,149 @@ Hooks.once("ready", async () => {
 
     console.log(`${MODULE_ID} | Version ${MODULE_VERSION} chargée.`);
 });
+
+function primaryActiveGM() {
+    return game.users
+        .filter(user => user.active && user.isGM)
+        .sort((a, b) => String(a.id).localeCompare(String(b.id)))[0] ?? null;
+}
+
+async function requestGMOperation(operation, payload) {
+    if (game.user.isGM) {
+        return executeGMOperation(operation, payload, game.user.id);
+    }
+
+    const gm = primaryActiveGM();
+    if (!gm) {
+        throw new Error("Aucun MJ actif n'est disponible pour appliquer la marque.");
+    }
+
+    const requestId = foundry.utils.randomID();
+
+    return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+            pendingSocketRequests.delete(requestId);
+            reject(new Error("Le MJ n'a pas répondu à la demande Automated Marks."));
+        }, 10000);
+
+        pendingSocketRequests.set(requestId, { resolve, reject, timeout });
+        game.socket.emit(SOCKET_NAME, {
+            kind: "request",
+            requestId,
+            operation,
+            payload,
+            requesterId: game.user.id,
+            gmId: gm.id
+        });
+    });
+}
+
+async function handleAutomatedMarksSocket(message) {
+    if (!message || typeof message !== "object") return;
+
+    if (message.kind === "response" && message.recipientId === game.user.id) {
+        const pending = pendingSocketRequests.get(message.requestId);
+        if (!pending) return;
+
+        clearTimeout(pending.timeout);
+        pendingSocketRequests.delete(message.requestId);
+        if (message.ok) pending.resolve(message.result);
+        else pending.reject(new Error(message.error || "Opération MJ refusée."));
+        return;
+    }
+
+    if (
+        message.kind !== "request" ||
+        !game.user.isGM ||
+        message.gmId !== game.user.id ||
+        primaryActiveGM()?.id !== game.user.id
+    ) return;
+
+    try {
+        const result = await executeGMOperation(
+            message.operation,
+            message.payload,
+            message.requesterId
+        );
+        game.socket.emit(SOCKET_NAME, {
+            kind: "response",
+            requestId: message.requestId,
+            recipientId: message.requesterId,
+            ok: true,
+            result
+        });
+    } catch (error) {
+        console.error(`${MODULE_ID} | Opération socket refusée`, error);
+        game.socket.emit(SOCKET_NAME, {
+            kind: "response",
+            requestId: message.requestId,
+            recipientId: message.requesterId,
+            ok: false,
+            error: error?.message ?? String(error)
+        });
+    }
+}
+
+async function executeGMOperation(operation, payload, requesterId) {
+    const requester = game.users.get(requesterId);
+    if (!requester) throw new Error("Utilisateur Automated Marks introuvable.");
+
+    if (operation === "createTargetEffect") {
+        const targetActor = await fromUuid(payload?.actorUuid);
+        const effectData = foundry.utils.deepClone(payload?.effectData ?? {});
+        const markFlags = effectData.flags?.[MODULE_ID] ?? {};
+        const caster = await fromUuid(markFlags.casterUuid);
+
+        if (!targetActor || !caster) throw new Error("Acteur de marque introuvable.");
+        if (!caster.testUserPermission(requester, CONST.DOCUMENT_OWNERSHIP_LEVELS.OWNER)) {
+            throw new Error("Le joueur ne possède pas le lanceur de la marque.");
+        }
+        if (
+            markFlags.targetEffect !== true ||
+            !["hex", "huntersMark"].includes(markFlags.markType)
+        ) {
+            throw new Error("Effet Automated Marks invalide.");
+        }
+
+        const [effect] = await targetActor.createEmbeddedDocuments(
+            "ActiveEffect",
+            [effectData]
+        );
+        return { effectUuid: effect?.uuid ?? null };
+    }
+
+    if (operation === "deleteTargetEffects") {
+        const targetActor = await fromUuid(payload?.actorUuid);
+        const effectIds = Array.from(payload?.effectIds ?? []);
+        if (!targetActor || !effectIds.length) return { deleted: 0 };
+
+        const effects = effectIds
+            .map(id => targetActor.effects.get(id))
+            .filter(Boolean);
+
+        for (const effect of effects) {
+            const flags = effect.flags?.[MODULE_ID] ?? {};
+            const caster = await fromUuid(flags.casterUuid);
+            if (
+                flags.targetEffect !== true ||
+                !caster?.testUserPermission(
+                    requester,
+                    CONST.DOCUMENT_OWNERSHIP_LEVELS.OWNER
+                )
+            ) {
+                throw new Error("Suppression d'effet Automated Marks refusée.");
+            }
+        }
+
+        await targetActor.deleteEmbeddedDocuments(
+            "ActiveEffect",
+            effects.map(effect => effect.id)
+        );
+        return { deleted: effects.length };
+    }
+
+    throw new Error(`Opération Automated Marks inconnue : ${operation}`);
+}
 
 
 
@@ -623,10 +770,15 @@ async function ensureTechnicalMacro(name, img, command) {
             type: "script",
             img,
             command,
-            ownership: { default: CONST.DOCUMENT_OWNERSHIP_LEVELS.NONE }
+            ownership: { default: CONST.DOCUMENT_OWNERSHIP_LEVELS.LIMITED }
         });
     } else {
-        await macro.update({ type: "script", img, command });
+        await macro.update({
+            type: "script",
+            img,
+            command,
+            ownership: { default: CONST.DOCUMENT_OWNERSHIP_LEVELS.LIMITED }
+        });
     }
 
     return macro;
@@ -848,9 +1000,7 @@ async function applyHex({ actor, item, target, ability, castLevel }) {
 
     const duration = makeDuration(castLevel);
 
-    const [targetEffect] = await targetActor.createEmbeddedDocuments(
-        "ActiveEffect",
-        [{
+    const targetEffect = await createActiveEffect(targetActor, {
             name: `Hex — ${abilityLabel(ability)}`,
             img: HEX_ICON,
             origin: item.uuid,
@@ -872,8 +1022,7 @@ async function applyHex({ actor, item, target, ability, castLevel }) {
                     castLevel
                 }
             }
-        }]
-    );
+        });
 
     const [damageEffect] = await actor.createEmbeddedDocuments(
         "ActiveEffect",
@@ -919,9 +1068,7 @@ async function applyHuntersMark({ actor, item, target, castLevel }) {
 
     const duration = makeDuration(castLevel);
 
-    const [targetEffect] = await targetActor.createEmbeddedDocuments(
-        "ActiveEffect",
-        [{
+    const targetEffect = await createActiveEffect(targetActor, {
             name: "Hunter's Mark",
             img: HUNTERS_MARK_ICON,
             origin: item.uuid,
@@ -937,8 +1084,7 @@ async function applyHuntersMark({ actor, item, target, castLevel }) {
                     castLevel
                 }
             }
-        }]
-    );
+        });
 
     const [damageEffect] = await actor.createEmbeddedDocuments(
         "ActiveEffect",
@@ -1057,9 +1203,7 @@ async function moveMark({
         }]
         : [];
 
-    const [targetEffect] = await newTargetActor.createEmbeddedDocuments(
-        "ActiveEffect",
-        [{
+    const targetEffect = await createActiveEffect(newTargetActor, {
             name: type === "hex"
                 ? `Hex — ${abilityLabel(ability)}`
                 : "Hunter's Mark",
@@ -1078,8 +1222,7 @@ async function moveMark({
                     castLevel
                 }
             }
-        }]
-    );
+        });
 
     await damageEffect.update({
         [`flags.${MODULE_ID}.${targetFlag}`]: newTokenDocument.uuid
@@ -1136,11 +1279,66 @@ async function deleteTargetEffects(casterUuid, type) {
 
         if (!effects.length) continue;
 
-        await checkedActor.deleteEmbeddedDocuments(
-            "ActiveEffect",
+        await deleteActiveEffects(
+            checkedActor,
             effects.map(effect => effect.id)
         );
     }
+}
+
+async function createActiveEffect(actor, effectData) {
+    if (!actor) return null;
+
+    if (actor.isOwner) {
+        const [effect] = await actor.createEmbeddedDocuments(
+            "ActiveEffect",
+            [effectData]
+        );
+        return effect ?? null;
+    }
+
+    const requestId = foundry.utils.randomID();
+    const remoteData = foundry.utils.deepClone(effectData);
+    remoteData.flags = foundry.utils.mergeObject(
+        remoteData.flags ?? {},
+        { [MODULE_ID]: { requestId } },
+        { inplace: false }
+    );
+
+    const result = await requestGMOperation("createTargetEffect", {
+        actorUuid: actor.uuid,
+        effectData: remoteData
+    });
+
+    if (result?.effectUuid) {
+        const remoteEffect = await fromUuid(result.effectUuid).catch(() => null);
+        if (remoteEffect) return remoteEffect;
+    }
+
+    // La mise à jour reçue du MJ peut arriver juste après la réponse socket.
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+        const effect = actor.effects?.find(candidate =>
+            candidate.getFlag(MODULE_ID, "requestId") === requestId
+        );
+        if (effect) return effect;
+        await new Promise(resolve => setTimeout(resolve, 50));
+    }
+
+    return null;
+}
+
+async function deleteActiveEffects(actor, effectIds) {
+    if (!actor || !effectIds?.length) return;
+
+    if (actor.isOwner) {
+        await actor.deleteEmbeddedDocuments("ActiveEffect", effectIds);
+        return;
+    }
+
+    await requestGMOperation("deleteTargetEffects", {
+        actorUuid: actor.uuid,
+        effectIds
+    });
 }
 
 function makeDuration(castLevel) {
