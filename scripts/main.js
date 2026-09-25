@@ -1,5 +1,5 @@
 const MODULE_ID = "automated-marks";
-const MODULE_VERSION = "1.0.2";
+const MODULE_VERSION = "1.0.3";
 const SOCKET_NAME = `module.${MODULE_ID}`;
 
 const HEX_NAME = "Hex";
@@ -137,7 +137,7 @@ const SPELL_SOURCES = [
     "flags": {
       "automated-marks": {
         "action": "applyHex",
-        "version": "1.0.0"
+        "version": "1.0.3"
       }
     },
     "_stats": {
@@ -305,7 +305,7 @@ const SPELL_SOURCES = [
     "flags": {
       "automated-marks": {
         "action": "applyHuntersMark",
-        "version": "1.0.0"
+        "version": "1.0.3"
       }
     },
     "_stats": {
@@ -333,7 +333,7 @@ const SCRIPT_SOURCES = [
     "flags": {
       "automated-marks": {
         "action": "moveHex",
-        "version": "1.0.0"
+        "version": "1.0.3"
       }
     },
     "_stats": {
@@ -357,7 +357,7 @@ const SCRIPT_SOURCES = [
     "flags": {
       "automated-marks": {
         "action": "moveHuntersMark",
-        "version": "1.0.0"
+        "version": "1.0.3"
       }
     },
     "_stats": {
@@ -368,8 +368,226 @@ const SCRIPT_SOURCES = [
     }
   }
 ];
-const HEX_DAMAGE_COMMAND = "const data = typeof args !== \"undefined\" ? args?.[0] : null;\nif (!data) return {};\n\nconst currentWorkflow =\n    data.workflow ??\n    (\n        data.uuid &&\n        typeof MidiQOL?.Workflow?.getWorkflow === \"function\"\n            ? MidiQOL.Workflow.getWorkflow(data.uuid)\n            : null\n    );\n\nif (!currentWorkflow) return {};\n\nlet attackingActor =\n    (typeof actor !== \"undefined\" ? actor : null) ??\n    currentWorkflow.actor ??\n    data.actor ??\n    null;\n\nif (!attackingActor && data.actorUuid) {\n    const actorDocument = await fromUuid(data.actorUuid);\n    attackingActor = actorDocument?.actor ?? actorDocument ?? null;\n}\n\nif (!attackingActor) return {};\n\nconst damageEffect = attackingActor.effects.find(effect =>\n    effect.getFlag(\"automated-marks\", \"hexDamageEffect\") === true\n);\n\nif (!damageEffect) return {};\n\nconst markedTargetUuid =\n    damageEffect.getFlag(\"automated-marks\", \"hexTargetUuid\");\n\nif (!markedTargetUuid) return {};\n\nconst markedDocument = await fromUuid(markedTargetUuid);\nif (!markedDocument) return {};\n\nconst markedTokenDocument =\n    markedDocument.documentName === \"Token\"\n        ? markedDocument\n        : markedDocument.document?.documentName === \"Token\"\n            ? markedDocument.document\n            : null;\n\nif (!markedTokenDocument) return {};\n\nconst markedToken =\n    markedTokenDocument.object ??\n    canvas.tokens.get(markedTokenDocument.id) ??\n    null;\n\nconst markedActor =\n    markedTokenDocument.actor ??\n    markedToken?.actor ??\n    null;\n\nif (!markedToken || !markedActor) return {};\n\nconst markedTokenUuid = markedTokenDocument.uuid;\nconst markedActorUuid = markedActor.uuid;\nconst targetCandidates = [];\n\nconst addTargets = collection => {\n    if (!collection) return;\n    if (typeof collection === \"string\") {\n        targetCandidates.push(collection);\n        return;\n    }\n    if (collection instanceof Set || Array.isArray(collection)) {\n        targetCandidates.push(...Array.from(collection));\n        return;\n    }\n    targetCandidates.push(collection);\n};\n\naddTargets(data.hitTargetUuids);\naddTargets(data.hitTargets);\naddTargets(data.targetUuids);\naddTargets(data.targets);\naddTargets(currentWorkflow.hitTargetUuids);\naddTargets(currentWorkflow.hitTargets);\naddTargets(currentWorkflow.targets);\n\nif (targetCandidates.length === 0) return {};\n\nconst targetMatchesMark = targetCandidates.some(candidate => {\n    if (!candidate) return false;\n\n    if (typeof candidate === \"string\") {\n        return (\n            candidate === markedTargetUuid ||\n            candidate === markedTokenUuid ||\n            candidate === markedActorUuid\n        );\n    }\n\n    const candidateTokenUuid =\n        candidate.document?.uuid ??\n        candidate.token?.document?.uuid ??\n        candidate.tokenUuid ??\n        candidate.uuid ??\n        null;\n\n    const candidateActorUuid =\n        candidate.actor?.uuid ??\n        candidate.document?.actor?.uuid ??\n        candidate.token?.actor?.uuid ??\n        candidate.actorUuid ??\n        null;\n\n    return (\n        candidateTokenUuid === markedTargetUuid ||\n        candidateTokenUuid === markedTokenUuid ||\n        candidateActorUuid === markedActorUuid\n    );\n});\n\nif (!targetMatchesMark) return {};\n\nconst isCritical =\n    data.isCritical === true ||\n    data.critical === true ||\n    currentWorkflow.isCritical === true ||\n    currentWorkflow.critical === true ||\n    currentWorkflow.attackRoll?.isCritical === true ||\n    data.attackRoll?.isCritical === true;\n\nconst damageFormula =\n    isCritical\n        ? \"2d6[necrotic]\"\n        : \"1d6[necrotic]\";\n\nconst flavor =\n    isCritical\n        ? \"Hex — Dégâts critiques\"\n        : \"Hex — Dégâts\";\n\nconst attackingToken =\n    currentWorkflow.token ??\n    currentWorkflow.tokenDocument?.object ??\n    canvas.tokens.placeables.find(token =>\n        token.actor?.uuid === attackingActor.uuid\n    ) ??\n    null;\n\nif (!attackingToken) return {};\n\nconst actorUuid = attackingActor.uuid;\nconst markedTokenUuidForDelay = markedTokenDocument.uuid;\nconst attackingTokenId = attackingToken.id;\n\nsetTimeout(async () => {\n    try {\n        const delayedActor = await fromUuid(actorUuid);\n        const delayedMarkedTokenDocument =\n            await fromUuid(markedTokenUuidForDelay);\n\n        if (!delayedActor || !delayedMarkedTokenDocument) return;\n\n        const delayedMarkedToken =\n            delayedMarkedTokenDocument.object ??\n            canvas.tokens.get(delayedMarkedTokenDocument.id) ??\n            null;\n\n        const delayedAttackingToken =\n            canvas.tokens.get(attackingTokenId) ??\n            canvas.tokens.placeables.find(token =>\n                token.actor?.uuid === delayedActor.uuid\n            ) ??\n            null;\n\n        if (!delayedMarkedToken || !delayedAttackingToken) return;\n\n        const damageRoll =\n            await new CONFIG.Dice.DamageRoll(\n                damageFormula,\n                delayedActor.getRollData()\n            ).evaluate({ async: true });\n\n        await new MidiQOL.DamageOnlyWorkflow(\n            delayedActor,\n            delayedAttackingToken,\n            damageRoll.total,\n            \"necrotic\",\n            [delayedMarkedToken],\n            damageRoll,\n            { flavor, itemCardId: null }\n        );\n    } catch (error) {\n        console.error(\"Automated Marks | Hex damage error\", error);\n        ui.notifications.error(\n            \"Hex : impossible de lancer les dégâts supplémentaires.\"\n        );\n    }\n}, 500);\n\nreturn {};";
-const HUNTERS_MARK_DAMAGE_COMMAND = "const data = typeof args !== \"undefined\" ? args?.[0] : null;\nif (!data) return {};\n\nconst currentWorkflow =\n    data.workflow ??\n    (\n        data.uuid &&\n        typeof MidiQOL?.Workflow?.getWorkflow === \"function\"\n            ? MidiQOL.Workflow.getWorkflow(data.uuid)\n            : null\n    );\n\nif (!currentWorkflow) return {};\n\nlet attackingActor =\n    (typeof actor !== \"undefined\" ? actor : null) ??\n    currentWorkflow.actor ??\n    data.actor ??\n    null;\n\nif (!attackingActor && data.actorUuid) {\n    const actorDocument = await fromUuid(data.actorUuid);\n    attackingActor = actorDocument?.actor ?? actorDocument ?? null;\n}\n\nif (!attackingActor) return {};\n\nconst damageEffect = attackingActor.effects.find(effect =>\n    effect.getFlag(\"automated-marks\", \"huntersMarkDamageEffect\") === true\n);\n\nif (!damageEffect) return {};\n\nconst markedTargetUuid =\n    damageEffect.getFlag(\"automated-marks\", \"huntersMarkTargetUuid\");\n\nif (!markedTargetUuid) return {};\n\nconst markedDocument = await fromUuid(markedTargetUuid);\nif (!markedDocument) return {};\n\nconst markedTokenDocument =\n    markedDocument.documentName === \"Token\"\n        ? markedDocument\n        : markedDocument.document?.documentName === \"Token\"\n            ? markedDocument.document\n            : null;\n\nif (!markedTokenDocument) return {};\n\nconst markedToken =\n    markedTokenDocument.object ??\n    canvas.tokens.get(markedTokenDocument.id) ??\n    null;\n\nconst markedActor =\n    markedTokenDocument.actor ??\n    markedToken?.actor ??\n    null;\n\nif (!markedToken || !markedActor) return {};\n\nconst markedTokenUuid = markedTokenDocument.uuid;\nconst markedActorUuid = markedActor.uuid;\nconst targetCandidates = [];\n\nconst addTargets = collection => {\n    if (!collection) return;\n    if (typeof collection === \"string\") {\n        targetCandidates.push(collection);\n        return;\n    }\n    if (collection instanceof Set || Array.isArray(collection)) {\n        targetCandidates.push(...Array.from(collection));\n        return;\n    }\n    targetCandidates.push(collection);\n};\n\naddTargets(data.hitTargetUuids);\naddTargets(data.hitTargets);\naddTargets(data.targetUuids);\naddTargets(data.targets);\naddTargets(currentWorkflow.hitTargetUuids);\naddTargets(currentWorkflow.hitTargets);\naddTargets(currentWorkflow.targets);\n\nif (targetCandidates.length === 0) return {};\n\nconst targetMatchesMark = targetCandidates.some(candidate => {\n    if (!candidate) return false;\n\n    if (typeof candidate === \"string\") {\n        return (\n            candidate === markedTargetUuid ||\n            candidate === markedTokenUuid ||\n            candidate === markedActorUuid\n        );\n    }\n\n    const candidateTokenUuid =\n        candidate.document?.uuid ??\n        candidate.token?.document?.uuid ??\n        candidate.tokenUuid ??\n        candidate.uuid ??\n        null;\n\n    const candidateActorUuid =\n        candidate.actor?.uuid ??\n        candidate.document?.actor?.uuid ??\n        candidate.token?.actor?.uuid ??\n        candidate.actorUuid ??\n        null;\n\n    return (\n        candidateTokenUuid === markedTargetUuid ||\n        candidateTokenUuid === markedTokenUuid ||\n        candidateActorUuid === markedActorUuid\n    );\n});\n\nif (!targetMatchesMark) return {};\n\nconst isCritical =\n    data.isCritical === true ||\n    data.critical === true ||\n    currentWorkflow.isCritical === true ||\n    currentWorkflow.critical === true ||\n    currentWorkflow.attackRoll?.isCritical === true ||\n    data.attackRoll?.isCritical === true;\n\nconst damageFormula =\n    isCritical\n        ? \"2d6[force]\"\n        : \"1d6[force]\";\n\nconst flavor =\n    isCritical\n        ? \"Hunter's Mark — Dégâts critiques\"\n        : \"Hunter's Mark — Dégâts\";\n\nconst attackingToken =\n    currentWorkflow.token ??\n    currentWorkflow.tokenDocument?.object ??\n    canvas.tokens.placeables.find(token =>\n        token.actor?.uuid === attackingActor.uuid\n    ) ??\n    null;\n\nif (!attackingToken) return {};\n\nconst actorUuid = attackingActor.uuid;\nconst markedTokenUuidForDelay = markedTokenDocument.uuid;\nconst attackingTokenId = attackingToken.id;\n\nsetTimeout(async () => {\n    try {\n        const delayedActor = await fromUuid(actorUuid);\n        const delayedMarkedTokenDocument =\n            await fromUuid(markedTokenUuidForDelay);\n\n        if (!delayedActor || !delayedMarkedTokenDocument) return;\n\n        const delayedMarkedToken =\n            delayedMarkedTokenDocument.object ??\n            canvas.tokens.get(delayedMarkedTokenDocument.id) ??\n            null;\n\n        const delayedAttackingToken =\n            canvas.tokens.get(attackingTokenId) ??\n            canvas.tokens.placeables.find(token =>\n                token.actor?.uuid === delayedActor.uuid\n            ) ??\n            null;\n\n        if (!delayedMarkedToken || !delayedAttackingToken) return;\n\n        const damageRoll =\n            await new CONFIG.Dice.DamageRoll(\n                damageFormula,\n                delayedActor.getRollData()\n            ).evaluate({ async: true });\n\n        await new MidiQOL.DamageOnlyWorkflow(\n            delayedActor,\n            delayedAttackingToken,\n            damageRoll.total,\n            \"force\",\n            [delayedMarkedToken],\n            damageRoll,\n            { flavor, itemCardId: null }\n        );\n    } catch (error) {\n        console.error(\"Automated Marks | Hunter's Mark damage error\", error);\n        ui.notifications.error(\n            \"Hunter's Mark : impossible de lancer les dégâts supplémentaires.\"\n        );\n    }\n}, 500);\n\nreturn {};";
+function buildDamageBonusCommand({ effectFlag, targetFlag, damageType, label }) {
+    return `const data = typeof args !== "undefined" ? args?.[0] : null;
+if (!data) return {};
+
+const currentWorkflow =
+    data.workflow ??
+    (
+        data.uuid &&
+        typeof MidiQOL?.Workflow?.getWorkflow === "function"
+            ? MidiQOL.Workflow.getWorkflow(data.uuid)
+            : null
+    );
+
+if (!currentWorkflow) return {};
+
+// Le bonus ne doit jamais être lancé au simple jet d'attaque.
+// On attend qu'un jet de dégâts de l'attaque principale existe réellement.
+const hasDamageRoll = Boolean(
+    data.damageRoll ||
+    data.damageRolls?.length ||
+    currentWorkflow.damageRoll ||
+    currentWorkflow.damageRolls?.length
+);
+if (!hasDamageRoll) return {};
+
+let attackingActor =
+    (typeof actor !== "undefined" ? actor : null) ??
+    currentWorkflow.actor ??
+    data.actor ??
+    null;
+
+if (!attackingActor && data.actorUuid) {
+    const actorDocument = await fromUuid(data.actorUuid);
+    attackingActor = actorDocument?.actor ?? actorDocument ?? null;
+}
+if (!attackingActor) return {};
+
+const damageEffect = attackingActor.effects.find(effect =>
+    effect.getFlag("${MODULE_ID}", "${effectFlag}") === true
+);
+if (!damageEffect) return {};
+
+const markedTargetUuid = damageEffect.getFlag("${MODULE_ID}", "${targetFlag}");
+if (!markedTargetUuid) return {};
+
+const markedDocument = await fromUuid(markedTargetUuid);
+if (!markedDocument) return {};
+
+const markedTokenDocument =
+    markedDocument.documentName === "Token"
+        ? markedDocument
+        : markedDocument.document?.documentName === "Token"
+            ? markedDocument.document
+            : null;
+if (!markedTokenDocument) return {};
+
+const markedToken =
+    markedTokenDocument.object ??
+    canvas.tokens.get(markedTokenDocument.id) ??
+    null;
+const markedActor = markedTokenDocument.actor ?? markedToken?.actor ?? null;
+if (!markedToken || !markedActor) return {};
+
+const markedTokenUuid = markedTokenDocument.uuid;
+const markedActorUuid = markedActor.uuid;
+
+const candidateMatchesMark = candidate => {
+    if (!candidate) return false;
+    if (typeof candidate === "string") {
+        return candidate === markedTargetUuid ||
+            candidate === markedTokenUuid ||
+            candidate === markedActorUuid;
+    }
+
+    const candidateTokenUuid =
+        candidate.document?.uuid ??
+        candidate.token?.document?.uuid ??
+        candidate.tokenUuid ??
+        candidate.uuid ??
+        null;
+    const candidateActorUuid =
+        candidate.actor?.uuid ??
+        candidate.document?.actor?.uuid ??
+        candidate.token?.actor?.uuid ??
+        candidate.actorUuid ??
+        null;
+
+    return candidateTokenUuid === markedTargetUuid ||
+        candidateTokenUuid === markedTokenUuid ||
+        candidateActorUuid === markedActorUuid;
+};
+
+// 1) Si Midi-QOL fournit ses cibles touchées à ce stade, elles font foi.
+const explicitHits = [];
+for (const collection of [
+    data.hitTargetUuids,
+    data.hitTargets,
+    currentWorkflow.hitTargetUuids,
+    currentWorkflow.hitTargets
+]) {
+    if (!collection) continue;
+    if (typeof collection === "string") explicitHits.push(collection);
+    else if (collection instanceof Set || Array.isArray(collection)) {
+        explicitHits.push(...Array.from(collection));
+    } else explicitHits.push(collection);
+}
+
+let attackHitMarkedTarget = explicitHits.some(candidateMatchesMark);
+
+// 2) Sur Midi-QOL 12.4.53, hitTargets peut encore être vide selon le pass.
+//    Dans ce cas on reproduit l'adjudication du jet : d20 / total / CA.
+if (!attackHitMarkedTarget && explicitHits.length === 0) {
+    const attackTotal = Number(
+        data.attackTotal ??
+        currentWorkflow.attackRoll?.total ??
+        data.attackRoll?.total ??
+        NaN
+    );
+    const d20 = Number(
+        data.attackD20 ??
+        data.diceRoll ??
+        currentWorkflow.attackRoll?.dice?.[0]?.total ??
+        NaN
+    );
+    const ac = Number(markedActor.system?.attributes?.ac?.value ?? NaN);
+
+    const workflowTargets = Array.from(
+        data.targets ?? currentWorkflow.targets ?? []
+    );
+    const markedWasTargeted = workflowTargets.some(candidateMatchesMark);
+
+    if (
+        markedWasTargeted &&
+        Number.isFinite(attackTotal) &&
+        Number.isFinite(ac)
+    ) {
+        attackHitMarkedTarget =
+            d20 === 20 ? true :
+            d20 === 1 ? false :
+            attackTotal >= ac;
+    }
+}
+
+// Hex / Hunter's Mark ne s'applique que si l'attaque a réellement touché
+// la créature marquée.
+if (!attackHitMarkedTarget) return {};
+
+const isCritical =
+    data.isCritical === true ||
+    data.critical === true ||
+    currentWorkflow.isCritical === true ||
+    currentWorkflow.critical === true ||
+    currentWorkflow.attackRoll?.isCritical === true ||
+    data.attackRoll?.isCritical === true;
+
+const damageFormula = isCritical
+    ? "2d6[${damageType}]"
+    : "1d6[${damageType}]";
+const flavor = isCritical
+    ? "${label} — Dégâts critiques"
+    : "${label} — Dégâts";
+
+const attackingToken =
+    currentWorkflow.token ??
+    currentWorkflow.tokenDocument?.object ??
+    canvas.tokens.placeables.find(token => token.actor?.uuid === attackingActor.uuid) ??
+    null;
+if (!attackingToken) return {};
+
+// Le DamageBonusMacro est appelé pendant le jet de dégâts principal.
+// Le léger délai laisse ce jet s'afficher/se résoudre avant le bonus.
+setTimeout(async () => {
+    try {
+        const liveMarkedDocument = await fromUuid(markedTokenUuid);
+        const liveMarkedToken =
+            liveMarkedDocument?.object ??
+            canvas.tokens.get(liveMarkedDocument?.id) ??
+            null;
+        const liveAttackingToken =
+            canvas.tokens.get(attackingToken.id) ??
+            canvas.tokens.placeables.find(token => token.actor?.uuid === attackingActor.uuid) ??
+            null;
+        if (!liveMarkedToken || !liveAttackingToken) return;
+
+        const damageRoll = await new CONFIG.Dice.DamageRoll(
+            damageFormula,
+            attackingActor.getRollData()
+        ).evaluate({ async: true });
+
+        await new MidiQOL.DamageOnlyWorkflow(
+            attackingActor,
+            liveAttackingToken,
+            damageRoll.total,
+            "${damageType}",
+            [liveMarkedToken],
+            damageRoll,
+            { flavor, itemCardId: null }
+        );
+    } catch (error) {
+        console.error("${MODULE_ID} | ${label} damage error", error);
+        ui.notifications.error("${label} : impossible de lancer les dégâts supplémentaires.");
+    }
+}, 250);
+
+return {};`;
+}
+
+const HEX_DAMAGE_COMMAND = buildDamageBonusCommand({
+    effectFlag: "hexDamageEffect",
+    targetFlag: "hexTargetUuid",
+    damageType: "necrotic",
+    label: "Hex"
+});
+
+const HUNTERS_MARK_DAMAGE_COMMAND = buildDamageBonusCommand({
+    effectFlag: "huntersMarkDamageEffect",
+    targetFlag: "huntersMarkTargetUuid",
+    damageType: "force",
+    label: "Hunter's Mark"
+});
 
 const processedWorkflows = new Set();
 const pendingSocketRequests = new Map();
@@ -727,8 +945,73 @@ Hooks.on("preDeleteMacro", (macro, options, userId) => {
     return false;
 });
 
+async function getSpellSourcesWithOriginalDescriptions() {
+    const sources = foundry.utils.deepClone(SPELL_SOURCES);
+
+    for (const source of sources) {
+        const identifier = String(source.system?.identifier ?? "").toLowerCase();
+        const name = String(source.name ?? "").trim().toLowerCase();
+        let original = null;
+
+        // Priorité aux sorts D&D5e déjà présents dans le monde.
+        original = game.items.find(item =>
+            item.type === "spell" &&
+            item.id !== source._id &&
+            (
+                String(item.system?.identifier ?? "").toLowerCase() === identifier ||
+                String(item.name ?? "").trim().toLowerCase() === name
+            ) &&
+            !item.getFlag(MODULE_ID, "action")
+        ) ?? null;
+
+        // Sinon, récupération depuis les compendiums D&D5e disponibles.
+        if (!original) {
+            const packs = game.packs.filter(pack =>
+                pack.documentName === "Item" &&
+                (
+                    pack.metadata?.packageName === "dnd5e" ||
+                    String(pack.collection ?? "").startsWith("dnd5e.")
+                )
+            );
+
+            for (const pack of packs) {
+                try {
+                    const index = await pack.getIndex({
+                        fields: ["name", "type", "system.identifier"]
+                    });
+                    const entry = index.find(document =>
+                        document.type === "spell" &&
+                        (
+                            String(document.system?.identifier ?? "").toLowerCase() === identifier ||
+                            String(document.name ?? "").trim().toLowerCase() === name
+                        )
+                    );
+                    if (!entry) continue;
+
+                    original = await pack.getDocument(entry._id);
+                    if (original) break;
+                } catch (error) {
+                    console.warn(`${MODULE_ID} | Lecture impossible du compendium ${pack.collection}`, error);
+                }
+            }
+        }
+
+        const originalDescription = original?.system?.description;
+        if (originalDescription?.value) {
+            source.system.description = foundry.utils.deepClone(originalDescription);
+            console.log(`${MODULE_ID} | Description originale récupérée pour ${source.name}.`);
+        } else {
+            console.warn(`${MODULE_ID} | Description originale introuvable pour ${source.name}; description Automated Marks conservée.`);
+        }
+    }
+
+    return sources;
+}
+
 async function repairAutomatedMarksContent() {
     if (!game.user.isGM) return;
+
+    const spellSources = await getSpellSourcesWithOriginalDescriptions();
 
     await ensureTechnicalMacro(
         HEX_DAMAGE_MACRO_NAME,
@@ -748,7 +1031,7 @@ async function repairAutomatedMarksContent() {
         label: "Automated Marks — Spell",
         type: "Item",
         documentClass: Item,
-        sources: SPELL_SOURCES
+        sources: spellSources
     });
 
     await ensureDocumentPack({
@@ -837,6 +1120,8 @@ async function rebuildPacks() {
         return ui.notifications.warn("Seul le MJ peut reconstruire les compendiums.");
     }
 
+    const spellSources = await getSpellSourcesWithOriginalDescriptions();
+
     for (const collection of [SPELL_PACK_COLLECTION, SCRIPT_PACK_COLLECTION]) {
         const pack = game.packs.get(collection);
         if (!pack) continue;
@@ -863,7 +1148,7 @@ async function rebuildPacks() {
         label: "Automated Marks — Spell",
         type: "Item",
         documentClass: Item,
-        sources: SPELL_SOURCES
+        sources: spellSources
     });
 
     await ensureDocumentPack({
