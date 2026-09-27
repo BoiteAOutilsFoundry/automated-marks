@@ -1,3 +1,15 @@
+# 1.0.7
+
+- Supprime automatiquement l’ancien `flags.dnd5e.DamageBonusMacro` des effets Hex/Hunter’s Mark déjà actifs créés par les versions <= 1.0.4.
+- Empêche ainsi le d6 de marque d’être relancé séparément après son intégration au jet de dégâts principal.
+- Le d6 reste inclus dans le bloc DAMAGE principal avec son type de dégâts propre et un seul APPLY.
+
+# 1.0.6
+
+- Hex et Hunter's Mark sont injectés dans la configuration native du jet de dégâts dnd5e avant sa création.
+- Le bonus typé fait désormais partie du même message de dégâts et doit produire un seul bloc Apply.
+- L'ancien traitement postDamageRoll est désactivé pour éviter un second jet.
+
 # Changelog
 
 ## [1.0.3] - 2026-09-25

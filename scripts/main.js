@@ -1,5 +1,5 @@
 const MODULE_ID = "automated-marks";
-const MODULE_VERSION = "1.0.3";
+const MODULE_VERSION = "1.0.7";
 const SOCKET_NAME = `module.${MODULE_ID}`;
 
 const HEX_NAME = "Hex";
@@ -137,7 +137,7 @@ const SPELL_SOURCES = [
     "flags": {
       "automated-marks": {
         "action": "applyHex",
-        "version": "1.0.3"
+        "version": "1.0.4"
       }
     },
     "_stats": {
@@ -305,7 +305,7 @@ const SPELL_SOURCES = [
     "flags": {
       "automated-marks": {
         "action": "applyHuntersMark",
-        "version": "1.0.3"
+        "version": "1.0.4"
       }
     },
     "_stats": {
@@ -333,7 +333,7 @@ const SCRIPT_SOURCES = [
     "flags": {
       "automated-marks": {
         "action": "moveHex",
-        "version": "1.0.3"
+        "version": "1.0.4"
       }
     },
     "_stats": {
@@ -357,7 +357,7 @@ const SCRIPT_SOURCES = [
     "flags": {
       "automated-marks": {
         "action": "moveHuntersMark",
-        "version": "1.0.3"
+        "version": "1.0.4"
       }
     },
     "_stats": {
@@ -382,16 +382,6 @@ const currentWorkflow =
     );
 
 if (!currentWorkflow) return {};
-
-// Le bonus ne doit jamais être lancé au simple jet d'attaque.
-// On attend qu'un jet de dégâts de l'attaque principale existe réellement.
-const hasDamageRoll = Boolean(
-    data.damageRoll ||
-    data.damageRolls?.length ||
-    currentWorkflow.damageRoll ||
-    currentWorkflow.damageRolls?.length
-);
-if (!hasDamageRoll) return {};
 
 let attackingActor =
     (typeof actor !== "undefined" ? actor : null) ??
@@ -424,12 +414,8 @@ const markedTokenDocument =
             : null;
 if (!markedTokenDocument) return {};
 
-const markedToken =
-    markedTokenDocument.object ??
-    canvas.tokens.get(markedTokenDocument.id) ??
-    null;
-const markedActor = markedTokenDocument.actor ?? markedToken?.actor ?? null;
-if (!markedToken || !markedActor) return {};
+const markedActor = markedTokenDocument.actor ?? markedTokenDocument.object?.actor ?? null;
+if (!markedActor) return {};
 
 const markedTokenUuid = markedTokenDocument.uuid;
 const markedActorUuid = markedActor.uuid;
@@ -460,7 +446,8 @@ const candidateMatchesMark = candidate => {
         candidateActorUuid === markedActorUuid;
 };
 
-// 1) Si Midi-QOL fournit ses cibles touchées à ce stade, elles font foi.
+// Le bonus n'est proposé que si la créature marquée fait partie des cibles
+// effectivement touchées par l'attaque.
 const explicitHits = [];
 for (const collection of [
     data.hitTargetUuids,
@@ -477,8 +464,8 @@ for (const collection of [
 
 let attackHitMarkedTarget = explicitHits.some(candidateMatchesMark);
 
-// 2) Sur Midi-QOL 12.4.53, hitTargets peut encore être vide selon le pass.
-//    Dans ce cas on reproduit l'adjudication du jet : d20 / total / CA.
+// Midi-QOL 12 peut appeler le DamageBonusMacro avant d'avoir rempli hitTargets.
+// On conserve donc le fallback déjà utilisé par le module : cible + total d'attaque + CA.
 if (!attackHitMarkedTarget && explicitHits.length === 0) {
     const attackTotal = Number(
         data.attackTotal ??
@@ -493,17 +480,10 @@ if (!attackHitMarkedTarget && explicitHits.length === 0) {
         NaN
     );
     const ac = Number(markedActor.system?.attributes?.ac?.value ?? NaN);
-
-    const workflowTargets = Array.from(
-        data.targets ?? currentWorkflow.targets ?? []
-    );
+    const workflowTargets = Array.from(data.targets ?? currentWorkflow.targets ?? []);
     const markedWasTargeted = workflowTargets.some(candidateMatchesMark);
 
-    if (
-        markedWasTargeted &&
-        Number.isFinite(attackTotal) &&
-        Number.isFinite(ac)
-    ) {
+    if (markedWasTargeted && Number.isFinite(attackTotal) && Number.isFinite(ac)) {
         attackHitMarkedTarget =
             d20 === 20 ? true :
             d20 === 1 ? false :
@@ -511,8 +491,6 @@ if (!attackHitMarkedTarget && explicitHits.length === 0) {
     }
 }
 
-// Hex / Hunter's Mark ne s'applique que si l'attaque a réellement touché
-// la créature marquée.
 if (!attackHitMarkedTarget) return {};
 
 const isCritical =
@@ -523,56 +501,12 @@ const isCritical =
     currentWorkflow.attackRoll?.isCritical === true ||
     data.attackRoll?.isCritical === true;
 
-const damageFormula = isCritical
-    ? "2d6[${damageType}]"
-    : "1d6[${damageType}]";
-const flavor = isCritical
-    ? "${label} — Dégâts critiques"
-    : "${label} — Dégâts";
-
-const attackingToken =
-    currentWorkflow.token ??
-    currentWorkflow.tokenDocument?.object ??
-    canvas.tokens.placeables.find(token => token.actor?.uuid === attackingActor.uuid) ??
-    null;
-if (!attackingToken) return {};
-
-// Le DamageBonusMacro est appelé pendant le jet de dégâts principal.
-// Le léger délai laisse ce jet s'afficher/se résoudre avant le bonus.
-setTimeout(async () => {
-    try {
-        const liveMarkedDocument = await fromUuid(markedTokenUuid);
-        const liveMarkedToken =
-            liveMarkedDocument?.object ??
-            canvas.tokens.get(liveMarkedDocument?.id) ??
-            null;
-        const liveAttackingToken =
-            canvas.tokens.get(attackingToken.id) ??
-            canvas.tokens.placeables.find(token => token.actor?.uuid === attackingActor.uuid) ??
-            null;
-        if (!liveMarkedToken || !liveAttackingToken) return;
-
-        const damageRoll = await new CONFIG.Dice.DamageRoll(
-            damageFormula,
-            attackingActor.getRollData()
-        ).evaluate({ async: true });
-
-        await new MidiQOL.DamageOnlyWorkflow(
-            attackingActor,
-            liveAttackingToken,
-            damageRoll.total,
-            "${damageType}",
-            [liveMarkedToken],
-            damageRoll,
-            { flavor, itemCardId: null }
-        );
-    } catch (error) {
-        console.error("${MODULE_ID} | ${label} damage error", error);
-        ui.notifications.error("${label} : impossible de lancer les dégâts supplémentaires.");
-    }
-}, 250);
-
-return {};`;
+// IMPORTANT : on renvoie le bonus à Midi-QOL au lieu de créer un
+// DamageOnlyWorkflow séparé. Midi l'ajoute ainsi au jet de dégâts de l'attaque.
+return {
+    damageRoll: isCritical ? "2d6[${damageType}]" : "1d6[${damageType}]",
+    flavor: isCritical ? "${label} — Dégâts critiques" : "${label} — Dégâts"
+};`;
 }
 
 const HEX_DAMAGE_COMMAND = buildDamageBonusCommand({
@@ -604,9 +538,12 @@ Hooks.once("ready", async () => {
 
     if (game.user.isGM) {
         await repairAutomatedMarksContent();
+        await migrateLegacyDamageBonusEffects();
     }
 
     Hooks.on("midi-qol.RollComplete", handleRollComplete);
+    Hooks.on("dnd5e.preRollDamageV2", handleMarkedPreRollDamageV2);
+    Hooks.on("midi-qol.postDamageRoll", handleMarkedPostDamageRoll);
 
     game.automatedMarks = {
         repair: repairAutomatedMarksContent,
@@ -617,6 +554,46 @@ Hooks.once("ready", async () => {
 
     console.log(`${MODULE_ID} | Version ${MODULE_VERSION} chargée.`);
 });
+
+async function migrateLegacyDamageBonusEffects() {
+    // Jusqu'à la 1.0.4, l'effet de dégâts ajoutait flags.dnd5e.DamageBonusMacro.
+    // Un Hex déjà actif au moment de la mise à jour conserve cette change et Midi-QOL
+    // relance alors encore le d6 séparément, même si le d6 a déjà été injecté dans
+    // le jet natif par preRollDamageV2. On retire uniquement cette ancienne change
+    // des effets créés par Automated Marks.
+    let cleaned = 0;
+
+    const actors = new Map();
+    for (const actor of game.actors ?? []) actors.set(actor.uuid, actor);
+    for (const scene of game.scenes ?? []) {
+        for (const token of scene.tokens ?? []) {
+            const actor = token.actor;
+            if (actor) actors.set(actor.uuid, actor);
+        }
+    }
+
+    for (const actor of actors.values()) {
+        for (const effect of actor.effects ?? []) {
+            const isOurDamageEffect =
+                effect.getFlag(MODULE_ID, "hexDamageEffect") === true ||
+                effect.getFlag(MODULE_ID, "huntersMarkDamageEffect") === true;
+            if (!isOurDamageEffect) continue;
+
+            const changes = Array.from(effect.changes ?? []);
+            const filtered = changes.filter(change =>
+                change.key !== "flags.dnd5e.DamageBonusMacro"
+            );
+            if (filtered.length === changes.length) continue;
+
+            await effect.update({ changes: filtered });
+            cleaned += 1;
+        }
+    }
+
+    if (cleaned) {
+        console.log(`${MODULE_ID} | ${cleaned} ancien(s) DamageBonusMacro retiré(s) des marques actives.`);
+    }
+}
 
 function primaryActiveGM() {
     return game.users
@@ -1013,18 +990,6 @@ async function repairAutomatedMarksContent() {
 
     const spellSources = await getSpellSourcesWithOriginalDescriptions();
 
-    await ensureTechnicalMacro(
-        HEX_DAMAGE_MACRO_NAME,
-        HEX_ICON,
-        HEX_DAMAGE_COMMAND
-    );
-
-    await ensureTechnicalMacro(
-        HUNTERS_MARK_DAMAGE_MACRO_NAME,
-        HUNTERS_MARK_ICON,
-        HUNTERS_MARK_DAMAGE_COMMAND
-    );
-
     await ensureDocumentPack({
         collection: SPELL_PACK_COLLECTION,
         name: SPELL_PACK_NAME,
@@ -1217,6 +1182,141 @@ async function consumeFavoredEnemyUse(actor) {
     return true;
 }
 
+function getMarkedDamageForActor(actor) {
+    if (!actor) return null;
+
+    const targets = Array.from(game.user?.targets ?? []);
+    const targetMatches = (effect, targetFlag) => {
+        const markedUuid = effect?.getFlag(MODULE_ID, targetFlag);
+        if (!markedUuid) return false;
+        return targets.some(target => {
+            const doc = normalizeTokenDocument(target);
+            return doc?.uuid === markedUuid || doc?.actor?.uuid === markedUuid;
+        });
+    };
+
+    const hexEffect = actor.effects.find(effect =>
+        effect.getFlag(MODULE_ID, "hexDamageEffect") === true
+    );
+    if (hexEffect && targetMatches(hexEffect, "hexTargetUuid")) {
+        return { formula: "1d6", type: "necrotic", label: "Hex" };
+    }
+
+    const huntersEffect = actor.effects.find(effect =>
+        effect.getFlag(MODULE_ID, "huntersMarkDamageEffect") === true
+    );
+    if (huntersEffect && targetMatches(huntersEffect, "huntersMarkTargetUuid")) {
+        return { formula: "1d6", type: "force", label: "Hunter's Mark" };
+    }
+
+    return null;
+}
+
+function handleMarkedPreRollDamageV2(config, dialog, message) {
+    try {
+        const activity = config?.subject;
+        const actor = activity?.actor ?? activity?.item?.actor;
+        if (!actor || !Array.isArray(config?.rolls) || !config.rolls.length) return;
+
+        const bonus = getMarkedDamageForActor(actor);
+        if (!bonus) return;
+
+        // Midi ne demande le jet de dégâts d'une attaque que lorsqu'elle doit être
+        // résolue. On ajoute donc le dé de marque directement à la configuration
+        // native dnd5e AVANT la construction du message de dégâts. Ainsi le dé
+        // apparaît dans le même bloc DAMAGE et dnd5e/Midi ne créent qu'un Apply.
+        if (config.__automatedMarksMerged) return;
+        config.__automatedMarksMerged = true;
+
+        const base = config.rolls[0] ?? {};
+        const extra = foundry.utils.deepClone(base);
+        extra.parts = [bonus.formula];
+        extra.options = foundry.utils.mergeObject(extra.options ?? {}, {
+            type: bonus.type,
+            flavor: bonus.label
+        }, { inplace: false });
+        extra.data = foundry.utils.deepClone(base.data ?? {});
+
+        // Évite de réutiliser les parties de dégâts de l'attaque principale.
+        // Le second DamageRoll appartient néanmoins au MEME message de dégâts :
+        // les résistances par type restent correctes et il n'y a qu'un Apply.
+        config.rolls.push(extra);
+
+        console.debug(`${MODULE_ID} | ${bonus.label} injecté dans le jet de dégâts natif (${bonus.formula} ${bonus.type}).`);
+    } catch (error) {
+        console.error(`${MODULE_ID} | Impossible d'injecter les dégâts de marque avant le jet`, error);
+    }
+}
+
+async function handleMarkedPostDamageRoll(workflow) {
+    // 1.0.6 : conservé comme garde de compatibilité, mais le bonus est désormais
+    // injecté avant le jet via dnd5e.preRollDamageV2.
+    return;
+    try {
+        if (!workflow?.actor || !workflow?.damageRoll) return;
+
+        // Hex et Hunter's Mark ne s'appliquent qu'à une attaque qui a effectivement
+        // touché la créature marquée. Les dégâts sont injectés dans le DamageRoll
+        // principal afin que Midi-QOL ne crée qu'une seule application de dégâts.
+        const hitTargets = Array.from(workflow.hitTargets ?? []);
+        if (!hitTargets.length) return;
+
+        const matchesMarkedTarget = (effect, targetFlag) => {
+            const markedUuid = effect?.getFlag(MODULE_ID, targetFlag);
+            if (!markedUuid) return false;
+            return hitTargets.some(target => {
+                const doc = normalizeTokenDocument(target);
+                return doc?.uuid === markedUuid || doc?.actor?.uuid === markedUuid;
+            });
+        };
+
+        let bonusFormula = null;
+        let bonusType = null;
+
+        const hexEffect = workflow.actor.effects.find(effect =>
+            effect.getFlag(MODULE_ID, "hexDamageEffect") === true
+        );
+        if (hexEffect && matchesMarkedTarget(hexEffect, "hexTargetUuid")) {
+            bonusFormula = workflow.isCritical ? "2d6" : "1d6";
+            bonusType = "necrotic";
+        }
+
+        const huntersEffect = workflow.actor.effects.find(effect =>
+            effect.getFlag(MODULE_ID, "huntersMarkDamageEffect") === true
+        );
+        if (!bonusFormula && huntersEffect && matchesMarkedTarget(huntersEffect, "huntersMarkTargetUuid")) {
+            bonusFormula = workflow.isCritical ? "2d6" : "1d6";
+            bonusType = "force";
+        }
+
+        if (!bonusFormula || !bonusType) return;
+
+        // Protection contre un éventuel double passage du hook sur le même workflow.
+        const marker = `${MODULE_ID}.markDamageMerged`;
+        if (foundry.utils.getProperty(workflow, marker)) return;
+        foundry.utils.setProperty(workflow, marker, true);
+
+        const originalFormula = workflow.damageRoll.formula;
+        const mergedFormula = `(${originalFormula}) + ${bonusFormula}[${bonusType}]`;
+        const rollData = workflow.actor.getRollData?.() ?? {};
+        const mergedRoll = await new Roll(mergedFormula, rollData).evaluate();
+
+        if (typeof workflow.setDamageRoll === "function") {
+            await workflow.setDamageRoll(mergedRoll);
+        } else {
+            workflow.damageRoll = mergedRoll;
+            workflow.damageTotal = mergedRoll.total;
+            workflow.damageRollHTML = await mergedRoll.render();
+        }
+
+        console.debug(
+            `${MODULE_ID} | Dégâts de marque fusionnés au jet principal : ${mergedFormula}`
+        );
+    } catch (error) {
+        console.error(`${MODULE_ID} | Impossible de fusionner les dégâts de marque`, error);
+    }
+}
+
 async function handleRollComplete(workflow) {
     try {
         if (!workflow?.actor || !workflow?.item) return;
@@ -1317,12 +1417,7 @@ async function applyHex({ actor, item, target, ability, castLevel }) {
             origin: item.uuid,
             disabled: false,
             duration,
-            changes: [{
-                key: "flags.dnd5e.DamageBonusMacro",
-                mode: CONST.ACTIVE_EFFECT_MODES.CUSTOM,
-                value: HEX_DAMAGE_MACRO_NAME,
-                priority: 20
-            }],
+            changes: [],
             flags: {
                 [MODULE_ID]: {
                     markType: "hex",
@@ -1379,12 +1474,7 @@ async function applyHuntersMark({ actor, item, target, castLevel }) {
             origin: item.uuid,
             disabled: false,
             duration,
-            changes: [{
-                key: "flags.dnd5e.DamageBonusMacro",
-                mode: CONST.ACTIVE_EFFECT_MODES.CUSTOM,
-                value: HUNTERS_MARK_DAMAGE_MACRO_NAME,
-                priority: 20
-            }],
+            changes: [],
             flags: {
                 [MODULE_ID]: {
                     markType: "huntersMark",
