@@ -10,7 +10,7 @@
   ],
   "compatibility": {
     "minimum": "12",
-    "verified": "12.343",
+    "verified": "12.331",
     "maximum": "12"
   },
   "relationships": {
@@ -51,6 +51,6 @@
   ],
   "socket": true,
   "url": "https://github.com/BoiteAOutilsFoundry/automated-marks",
-  "manifest": "https://github.com/BoiteAOutilsFoundry/automated-marks/releases/12.0.0/download/module.json",
+  "manifest": "https://github.com/BoiteAOutilsFoundry/automated-marks/releases/download/v12.0.0/module.json",
   "download": "https://github.com/BoiteAOutilsFoundry/automated-marks/releases/download/v12.0.0/automated-marks.zip"
 }
